@@ -45,14 +45,15 @@ Zephyr itself. `west` fetches Zephyr and the required HAL modules into
 sibling folders inside a workspace, based on `west.yml`.
 
 ```bash
-# 1. Create the workspace and pull this repo into it as the manifest project
-west init -m https://github.com/baskpann/zephyr-ble-lab --mr main ble-workspace
-cd zephyr-ble-workspace
-
-# 2. Python environment for west + Zephyr tooling
-python3 -m venv .venv
-source .venv/bin/activate
+# 1. Python environment for west + Zephyr tooling
+python3 -m venv ~/zephyr-ble-workspace/.venv
+# do this in every new shell
+source ~/zephyr-ble-workspace/.venv/bin/activate
 pip install west
+
+# 2. Create the workspace and pull this repo into it as the manifest project
+west init -m https://github.com/baskpann/zephyr-ble-lab --mr main zephyr-ble-workspace
+cd zephyr-ble-workspace
 
 # 3. Fetch Zephyr + modules per west.yml
 west update
