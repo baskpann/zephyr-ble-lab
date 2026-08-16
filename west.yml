@@ -1,0 +1,22 @@
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      # using v3.7 as it is the current LTS version
+      revision: v3.7.0
+      import:
+        # Pulls in only the HAL modules Zephyr actually needs for my boards
+        # (hal_nordic for nRF52840, hal_stm32 for STM32F4) instead of everything.
+        name-allowlist:
+          - hal_nordic
+          - hal_stm32
+          - cmsis
+          - mcuboot   # needed later for project #8 (DFU); harmless to include now
+
+  self:
+    path: zephyr-ble-lab
+    west-commands: null
