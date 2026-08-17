@@ -28,7 +28,7 @@ zephyr-ble-lab/
 |   |   |   ├── inc/
 |   |   |   └── boards/
 |   |   └── 01-...
-├── docs/                    # Architecture notes, wiring diagrams, weekly log
+├── docs/                    # Architecture notes, wiring diagrams
 └── .github/workflows/       # CI: builds app on push
 ```
 
@@ -69,7 +69,7 @@ source zephyr/zephyr-env.sh
 Resulting layout:
 
 ```
-ble-workspace/            # not committed — machine-local workspace
+zephyr-ble-workspace/            # not committed — machine-local workspace
 ├── .venv/
 ├── .west/
 ├── zephyr/               # pulled per west.yml revision pin
@@ -80,33 +80,33 @@ ble-workspace/            # not committed — machine-local workspace
 ## Building an app
 
 ```bash
-source ble-workspace/.venv/bin/activate
-source ble-workspace/zephyr/zephyr-env.sh
+source ~/zephyr-ble-workspace/.venv/bin/activate
+source ~/zephyr-ble-workspace/zephyr/zephyr-env.sh
 
 # Controller (nRF52840)
 west build -b nrf52840dk_nrf52840 -d build/controller \
-  zephyr-ble-lab/apps/controller
+  zephyr-ble-lab/apps/controller/00-hci-bringup
 
 # Host (STM32F4)
-west build -b nucleo_f429zi -d build/host \
+west build -b stm32f4_disco -d build/host \
   zephyr-ble-lab/apps/host/00-hci-bringup/
 ```
 
 Flash each with `west flash -d build/<controller|host>` after wiring the
 boards per `docs/wiring.md`.
 
-## Projects
+## Projects/Apps
 
-| # | Project | Status |
+| # | Project/Apps | Status |
 |---|---------|--------|
 | 00 | HCI bring-up (Host + Controller split over UART) | In progress |
 
-Planning to add more projects in the future
+Planning to add more apps in the future
 
 ## Hardware
 
-- Controller: nRF52840-DK (or compatible nRF52840 board)
-- Host: STM32F4 Discovery (stm32f4_disco or similar)
+- Controller: nRF52840-DK (nrf52840dk/nrf52840)
+- Host: STM32F4 Discovery (stm32f4_disco)
 - Wiring: UART TX/RX/RTS/CTS cross-connected + common GND — see
   `docs/wiring.md` for pin mapping.
 
