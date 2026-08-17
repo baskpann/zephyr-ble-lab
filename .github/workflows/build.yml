@@ -1,0 +1,154 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  # Must match what your pinned Zephyr revision (west.yml) expects.
+  # Check zephyr/SDK_VERSION in the Zephyr checkout, or the Zephyr release
+  # notes for the revision you're pinned to.
+  SDK_VERSION: "0.16.8"
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover apps and infer board per role
+        id: set-matrix
+        run: |
+          entries="[]"
+
+          # Every apps/controller/<name>/ with a CMakeLists.txt builds for
+          # the nRF52840. Every apps/host/<name>/ builds for the STM32F4
+          # Discovery. This holds for every project currently planned; if a
+          # project ever needs a different board, drop an optional
+          # `.board` file in that app's directory (see override below)
+          # instead of reintroducing a central metadata file.
+          for role_dir in apps/controller apps/host; do
+            [ -d "$role_dir" ] || continue
+
+            case "$role_dir" in
+              apps/controller) default_board="nrf52840dk/nrf52840" ;;
+              apps/host)       default_board="stm32f4_disco" ;;
+            esac
+
+            for app_path in "$role_dir"/*/; do
+              [ -f "${app_path}CMakeLists.txt" ] || continue
+
+              name=$(echo "$app_path" | sed -E 's#apps/(controller|host)/##; s#/$##')
+              role=$(basename "$role_dir")
+              board="$default_board"
+
+              # Optional per-app override: `apps/<role>/<name>/.board`
+              # containing e.g. "nrf52840dk/nrf52840@1.0.0" — only needed
+              # the day a project actually deviates from the default.
+              if [ -f "${app_path}.board" ]; then
+                board=$(cat "${app_path}.board")
+              fi
+
+              entries=$(echo "$entries" | python3 -c "
+          import json, sys
+          entries = json.load(sys.stdin)
+          entries.append({
+              'name': '${role}-${name}',
+              'app': '${app_path%/}',
+              'board': '${board}'
+          })
+          print(json.dumps(entries))
+          ")
+            done
+          done
+
+          matrix=$(echo "{\"include\": $entries}")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Discovered matrix:"
+          echo "$matrix" | python3 -m json.tool
+
+  build:
+    needs: generate-matrix
+    if: needs.generate-matrix.outputs.matrix != '{"include":[]}'
+    runs-on: ubuntu-latest
+    container:
+      # Pin a tag matching the Zephyr revision in west.yml — don't track
+      # :latest, or CI can silently break on upstream image changes.
+      image: zephyrprojectrtos/ci:v0.27.4
+      options: --user root
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout manifest repo
+        uses: actions/checkout@v4
+        with:
+          path: zephyr-ble-lab
+
+      - name: Cache west modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            zephyr
+            modules
+            bootloader
+            tools
+          key: west-modules-${{ hashFiles('zephyr-ble-lab/west.yml') }}
+          restore-keys: |
+            west-modules-
+
+      - name: Initialize west workspace
+        run: |
+          west init -l zephyr-ble-lab
+          west update
+          west zephyr-export
+
+      - name: Install Python requirements
+        run: |
+          pip install -r zephyr/scripts/requirements.txt
+
+      - name: Cache Zephyr SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/toolchains/zephyr-sdk-${{ env.SDK_VERSION }}
+          key: zephyr-sdk-${{ env.SDK_VERSION }}
+
+      - name: Install Zephyr SDK (arm-zephyr-eabi only)
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /opt/toolchains
+          cd /opt/toolchains
+          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ env.SDK_VERSION }}/zephyr-sdk-${{ env.SDK_VERSION }}_linux-x86_64_minimal.tar.xz
+          tar xf zephyr-sdk-${{ env.SDK_VERSION }}_linux-x86_64_minimal.tar.xz
+          rm zephyr-sdk-${{ env.SDK_VERSION }}_linux-x86_64_minimal.tar.xz
+          # STM32F4 and nRF52840 are both Cortex-M (ARM) — only need this
+          # one toolchain, not the full multi-arch SDK bundle.
+          ./zephyr-sdk-${{ env.SDK_VERSION }}/setup.sh -t arm-zephyr-eabi -c
+
+      - name: Point build at the SDK
+        run: |
+          echo "ZEPHYR_TOOLCHAIN_VARIANT=zephyr" >> "$GITHUB_ENV"
+          echo "ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-${{ env.SDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Build ${{ matrix.name }}
+        run: |
+          west build -p always -b ${{ matrix.board }} \
+            -d build/${{ matrix.name }} \
+            zephyr-ble-lab/${{ matrix.app }}
+
+      - name: Upload build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-elf
+          path: build/${{ matrix.name }}/zephyr/zephyr.elf
+          if-no-files-found: ignore
+          retention-days: 14
